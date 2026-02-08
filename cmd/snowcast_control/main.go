@@ -1,12 +1,15 @@
 package main
 
 import (
-	"net"
+	"bufio"
 	"fmt"
-	"snowcast-jamesyan2028/pkg/protocol"
-	"os"
 	"log"
+	"net"
+	"os"
+	"snowcast-jamesyan2028/pkg/protocol"
 	"strconv"
+	"strings"
+	"unicode"
 )
 
 func main() {
@@ -19,12 +22,13 @@ func main() {
 	listenerPort, err := strconv.ParseUint(os.Args[3], 10, 16)
 	if err != nil {
 		log.Fatalf("Error parsing listener port: %v", err)
+		return
 	}
 
 	conn, err := net.Dial("tcp", controlIP+":"+controlPort)
 	if err != nil {
 		fmt.Println("error connecting to server: ", err)
-		panic(err)
+		return
 	}
 	hello := &protocol.HelloMessage{
 		CommandType: 0,
@@ -46,8 +50,70 @@ func main() {
 		panic(err)
 	}
 	fmt.Printf("Welcome to Snowcast! The server has %d stations\n", welcomeMessage.NumStations)
+
+	go handleServerEvent(conn)
 	for {
-
+		
 	}
+}
 
+func handleServerEvent(conn net.Conn) {
+	for {
+		msg, err := protocol.DeserializeServerMessage(conn)
+		if err != nil {
+			fmt.Println("Error receiving server message: ", err)
+		}
+		switch msgType := msg.(type) {
+		case *protocol.WelcomeMessage:
+			fmt.Printf("Welcome to Snowcast! The server has %d stations\n", msgType.NumStations)
+		case *protocol.AnnounceMessage:
+			fmt.Printf("New Song Announced: %s\n", msgType.SongName)
+		case *protocol.InvalidCommandMessage:
+			fmt.Printf("Invalid Command: %s\n", msgType.ReplyString)
+			conn.Close()
+			return
+		default:
+			fmt.Printf("Unknown message type received: %s\n", msg)
+			conn.Close()
+			return
+		}
+	}
+}
+
+func handleUserInput(conn net.Conn) {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		input := scanner.Text()
+		input = strings.TrimSpace(input)
+		switch {
+		case input == "q":
+			conn.Close()
+			return
+		case input == "":
+			continue
+		case checkOnlyNumbers(input):
+			stationNum, err := strconv.ParseUint(input, 10, 16)
+			if err != nil {
+				fmt.Printf("Error Parsing Station Number: %s\n", err)
+			}
+
+			setStationMessage = &protocol.SetStationMessage{
+				CommandType: 1,
+				StationNumber: uint16(stationNum),
+			}
+			
+		default:
+			fmt.Printf("Invalid Command: %s\n", input)
+			continue
+		}
+	}
+}
+
+func checkOnlyNumbers(s string)bool {
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	} 
+	return true
 }

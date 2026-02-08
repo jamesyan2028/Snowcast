@@ -3,6 +3,8 @@ import (
 	"encoding/binary"
 	"bytes"
 	"net"
+	"fmt"
+	"io"
 )
 
 type HelloMessage struct {
@@ -10,9 +12,27 @@ type HelloMessage struct {
     UdpPort     uint16
 }
 
+type SetStationMessage struct {
+	CommandType uint8
+	StationNumber uint16
+}
+
 type WelcomeMessage struct {
     ReplyType   uint8
     NumStations uint16
+	SongName string
+}
+
+type AnnounceMessage struct {
+	ReplyType uint8
+	SongNameSize uint8
+	SongName string
+}
+
+type InvalidCommandMessage struct {
+	ReplyType uint8
+	ReplyStringSize uint8
+	ReplyString string
 }
 
 const (
@@ -70,4 +90,63 @@ func DeserializeWelcome(conn net.Conn) (*WelcomeMessage, error) {
 		NumStations: uint16(binary.BigEndian.Uint16(buffer[1:3])),
 	}
 	return msg, nil
+}
+
+func DeserializeAnnounce(conn net.Conn) (*AnnounceMessage, error) {
+	buffer := make([]byte, 1)
+	_, err := conn.Read(buffer)
+	if err != nil {
+		return nil, err
+	}
+	songNameSize := buffer[0]
+	buffer = make([]byte, songNameSize)
+	_, err = io.ReadFull(conn, buffer)
+	if err != nil {
+		return nil, err
+	}
+	msg := &AnnounceMessage{
+		ReplyType: 3,
+		SongNameSize: songNameSize,
+		SongName: string(buffer),
+	}
+	return msg, nil
+}
+
+func DeserializeInvalidCommand(conn net.Conn) (*InvalidCommandMessage, error) {
+	buffer := make([]byte, 1)
+	_, err := conn.Read(buffer)
+	if err != nil {
+		return nil, err
+	}
+	replyStringSize := buffer[0]
+	buffer = make([]byte, replyStringSize)
+	_, err = io.ReadFull(conn, buffer)
+	if err != nil {
+		return nil, err
+	}
+	msg := &InvalidCommandMessage{
+		ReplyType: 4,
+		ReplyStringSize: replyStringSize,
+		ReplyString: string(buffer),
+	}
+	return msg, nil
+}
+
+func DeserializeServerMessage(conn net.Conn) (interface{}, error) {
+	buffer := make([]byte, 1)
+	_, err := conn.Read(buffer)
+	if err != nil {
+		return nil, err
+	}
+	replyType := buffer[0]
+	switch replyType {
+	case 2:
+		return DeserializeWelcome(conn)
+	case 3:
+		return DeserializeAnnounce(conn)
+	case 4:
+		return DeserializeInvalidCommand(conn)
+	default:
+		return nil, fmt.Errorf("Unknown reply type: %d", replyType)
+	}
 }
