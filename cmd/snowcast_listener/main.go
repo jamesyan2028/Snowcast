@@ -13,7 +13,7 @@ func main() {
 	}
 
 	listenPort := os.Args[1]
-	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+listenPort)
+	addr, err := net.ResolveUDPAddr("udp", ":"+listenPort)
 	if err != nil {
 		fmt.Println("Error Resolving Address: ", err)
 		return

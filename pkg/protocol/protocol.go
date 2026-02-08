@@ -38,6 +38,7 @@ type InvalidCommandMessage struct {
 const (
 	HelloMessageSize   = 3
 	WelcomeMessageSize = 3
+	SetStationMessageSize = 3
 )
 
 func (m *HelloMessage) SerializeHello() ([]byte, error) {
@@ -149,4 +150,49 @@ func DeserializeServerMessage(conn net.Conn) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("Unknown reply type: %d", replyType)
 	}
+}
+
+func SerializeSetStation(m *SetStationMessage) ([]byte, error) {
+	buffer := new(bytes.Buffer)
+	err := binary.Write(buffer, binary.BigEndian, m.CommandType)
+	if err != nil {
+		return nil, err
+	}
+	err = binary.Write(buffer, binary.BigEndian, m.StationNumber)
+	if err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+func DeserializeSetStation(conn net.Conn) (*SetStationMessage, error) {
+	buffer := make([]byte, SetStationMessageSize)
+	_, err := conn.Read(buffer)
+	if err != nil {
+		return nil, err
+	}
+
+	msg := &SetStationMessage {
+		CommandType: buffer[0], 
+		StationNumber: uint16(binary.BigEndian.Uint16(buffer[1:])),
+	}
+
+	return msg, nil
+}
+
+func SerializeAnnounce(m *AnnounceMessage) ([]byte, error) {
+	buffer := new(bytes.Buffer)
+	err := binary.Write(buffer, binary.BigEndian, m.ReplyType)
+	if err != nil {
+		return nil, err
+	}
+	err = binary.Write(buffer, binary.BigEndian, m.SongNameSize)
+	if err != nil {
+		return nil, err
+	}
+	err = binary.Write(buffer, binary.BigEndian, m.SongName)
+	if err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }

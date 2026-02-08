@@ -51,10 +51,21 @@ func main() {
 	}
 	fmt.Printf("Welcome to Snowcast! The server has %d stations\n", welcomeMessage.NumStations)
 
-	go handleServerEvent(conn)
-	for {
-		
-	}
+	exit := make(chan bool)
+
+	go func() {
+		handleServerEvent(conn)
+		exit <- true
+	}()
+
+	go func() {
+		handleUserInput(conn)
+		exit <- true
+	}()
+
+	<- exit
+
+	conn.Close()
 }
 
 func handleServerEvent(conn net.Conn) {
@@ -70,11 +81,9 @@ func handleServerEvent(conn net.Conn) {
 			fmt.Printf("New Song Announced: %s\n", msgType.SongName)
 		case *protocol.InvalidCommandMessage:
 			fmt.Printf("Invalid Command: %s\n", msgType.ReplyString)
-			conn.Close()
 			return
 		default:
 			fmt.Printf("Unknown message type received: %s\n", msg)
-			conn.Close()
 			return
 		}
 	}
@@ -87,7 +96,6 @@ func handleUserInput(conn net.Conn) {
 		input = strings.TrimSpace(input)
 		switch {
 		case input == "q":
-			conn.Close()
 			return
 		case input == "":
 			continue
@@ -97,11 +105,17 @@ func handleUserInput(conn net.Conn) {
 				fmt.Printf("Error Parsing Station Number: %s\n", err)
 			}
 
-			setStationMessage = &protocol.SetStationMessage{
+			setStationMessage := &protocol.SetStationMessage{
 				CommandType: 1,
 				StationNumber: uint16(stationNum),
 			}
-			
+
+			serializedMessage, err := protocol.SerializeSetStation(setStationMessage)
+			if err != nil {
+				fmt.Printf("Error serializing Message: " + "%s", err)
+				continue
+			}
+			conn.Write(serializedMessage)
 		default:
 			fmt.Printf("Invalid Command: %s\n", input)
 			continue
