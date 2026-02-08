@@ -31,7 +31,7 @@ type Station struct {
 
 var (
 	currentClients = make(map[net.Conn]*ClientInfo)
-	mutex sync.Mutex
+	clientMutex sync.Mutex
 	stationList []Station
 )
 
@@ -132,9 +132,92 @@ func handleConnection(ci *WelcomeInfo) {
 	}
 	fmt.Println("Client Connected: ", conn.RemoteAddr().String())
 	for {
-		
+		msg, err := protocol.DeserializeClientMessage(conn)
+		if err != nil {
+			fmt.Printf("Error reading client message: %s", err)
+			continue
+		}
+		switch msgType := msg.(type) {
+		case *protocol.WelcomeMessage:
+			response := &protocol.InvalidCommandMessage{
+				ReplyType: 4,
+				ReplyStringSize: 32,
+				ReplyString: "Cannot send second Hello Message",
+			}
+			serializedMsg, err := protocol.SerializeInvalidMessage(response)
+			if err != nil {
+				fmt.Printf("Error serializing invalid message: %s", err)
+				continue
+			}
+			conn.Write(serializedMsg)
+			conn.Close()
+			return
+		case *protocol.SetStationMessage:
+			newStationNumber := msgType.StationNumber
+			if int(newStationNumber) < len(stationList) && int(newStationNumber) >= 0 {
+				changeStation(conn, int(newStationNumber))
+			} else {
+				response := &protocol.InvalidCommandMessage{
+					ReplyType: 4,
+					ReplyStringSize: 22,
+					ReplyString: "Invalid Station Number",
+				}
+				serializedMsg, err := protocol.SerializeInvalidMessage(response)
+				if err != nil {
+					fmt.Printf("Error serializing invalid message: %s", err)
+					continue
+				}
+				conn.Write(serializedMsg)
+				conn.Close()
+				return
+			}
+		default:
+			response := &protocol.InvalidCommandMessage{
+				ReplyType: 4,
+				ReplyStringSize: 20,
+				ReplyString: "Invalid Message Type",
+			}
+			serializedMsg, err := protocol.SerializeInvalidMessage(response)
+			if err != nil {
+				fmt.Printf("Error serializing invalid message: %s", err)
+				continue
+			}
+			conn.Write(serializedMsg)
+			conn.Close()
+			return
+		}
 	}
 	
+}
+
+func changeStation(conn net.Conn, newStationIndex int) {
+	clientMutex.Lock()
+	client := currentClients[conn]
+	clientMutex.Unlock()
+
+	
+	if client.currStation != -1 {
+		oldStation := client.currStation
+		stationList := &stationList[oldStation]
+		stationList.mutex.Lock()
+		for i, c := range stationList.clients {
+			if c == client {
+				stationList.clients[i] = stationList.clients[len(stationList.clients) - 1]
+				stationList.clients = stationList.clients[:len(stationList.clients) - 1]
+				break
+			}
+		}
+		stationList.mutex.Unlock()
+	}
+
+	clientMutex.Lock()
+	client.currStation = newStationIndex
+	clientMutex.Unlock()
+
+	newStationList := &stationList[newStationIndex]
+	newStationList.mutex.Lock()
+	newStationList.clients = append(newStationList.clients, client)
+	newStationList.mutex.Unlock()
 }
 
 func streamStation(id int, filename string, udpConn *net.UDPConn) {

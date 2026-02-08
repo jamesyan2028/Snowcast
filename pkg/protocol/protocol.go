@@ -196,3 +196,38 @@ func SerializeAnnounce(m *AnnounceMessage) ([]byte, error) {
 	}
 	return buffer.Bytes(), nil
 }
+
+func DeserializeClientMessage(conn net.Conn) (interface{}, error) {
+	buffer := make([]byte, 1)
+	_, err := conn.Read(buffer)
+	if err != nil {
+		return nil, err
+	}
+	replyType := buffer[0]
+	switch replyType {
+	case 0:
+		return DeserializeHello(conn)
+	case 1:
+		return DeserializeSetStation(conn)
+	default:
+		return nil, fmt.Errorf("Unknown Message Type: %d", replyType)
+	}	
+}
+
+func SerializeInvalidMessage(m *InvalidCommandMessage) ([]byte, error) {
+	buffer := new(bytes.Buffer)
+	err := binary.Write(buffer, binary.BigEndian, m.ReplyType)
+	if err != nil {
+		return nil, err
+	}
+	err = binary.Write(buffer, binary.BigEndian, m.ReplyStringSize)
+	if err != nil {
+		return nil, err
+	}
+	err = binary.Write(buffer, binary.BigEndian, m.ReplyString)
+	if err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+
+}
