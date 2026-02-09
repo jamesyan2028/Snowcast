@@ -12,7 +12,10 @@ import (
 	"unicode"
 	"io"
 	"errors"
+	"time"
 )
+
+var joinedStation bool = false
 
 func main() {
 	if len(os.Args) != 4 {
@@ -39,18 +42,25 @@ func main() {
 	serializedHello, err := hello.SerializeHello()
 	if err != nil {
 		fmt.Println("Error serializing hello message: ", err)
-		panic(err)
+		return
 	}
 	_, err = conn.Write(serializedHello)
 	if err != nil {
 		fmt.Println("Error sending hello message to server: ", err)
-		panic(err)
+		return
 	}
+
+	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	welcomeMessage, err := protocol.DeserializeWelcome(conn)
 	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			fmt.Printf("Timeout from client %s, disconnecting", conn.RemoteAddr())
+			return
+		}
 		fmt.Println("Error receiving welcome message from server: ", err)
-		panic(err)
+		return
 	}
+	conn.SetReadDeadline(time.Time{})
 	fmt.Printf("Welcome to Snowcast! The server has %d stations\n", welcomeMessage.NumStations)
 
 	exit := make(chan bool)
@@ -76,14 +86,22 @@ func handleServerEvent(conn net.Conn) {
 		if err != nil {
 			if err == io.EOF || errors.Is(err, net.ErrClosed){
 				return
+			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				fmt.Printf("Timeout error from server %s, disconnecting from server\n", conn.RemoteAddr())
+				return
 			}
 			fmt.Println("Error receiving server message: ", err)
 			return
 		}
 		switch msgType := msg.(type) {
 		case *protocol.WelcomeMessage:
-			fmt.Printf("Welcome to Snowcast! The server has %d stations\n", msgType.NumStations)
+			fmt.Print("Received Unexpected Second Welcome Message, Disconnecting\n")
+			return
 		case *protocol.AnnounceMessage:
+			if !joinedStation {
+				fmt.Print("Received Announce Message Before Joining Station, closing connection")
+				return
+			}
 			fmt.Printf("New Song Announced: %s\n", msgType.SongName)
 		case *protocol.InvalidCommandMessage:
 			fmt.Printf("Invalid Command: %s\n", msgType.ReplyString)
@@ -121,6 +139,7 @@ func handleUserInput(conn net.Conn) {
 				fmt.Printf("Error serializing Message: " + "%s", err)
 				continue
 			}
+			joinedStation = true
 			conn.Write(serializedMessage)
 		default:
 			fmt.Printf("Invalid Command: %s\n", input)

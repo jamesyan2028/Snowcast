@@ -1,10 +1,12 @@
 package protocol
+
 import (
-	"encoding/binary"
 	"bytes"
-	"net"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"net"
+	"time"
 )
 
 type HelloMessage struct {
@@ -68,21 +70,21 @@ func (m *WelcomeMessage) SerializeWelcome() ([]byte, error) {
 }
 
 func DeserializeHello(conn net.Conn) (*HelloMessage, error) {
-	buffer := make([]byte, HelloMessageSize)
-	_, err := conn.Read(buffer)
+	buffer := make([]byte, 2)
+	_, err := io.ReadFull(conn, buffer)
 	if err != nil {
 		return nil, err
 	}
 	msg := &HelloMessage{
-		CommandType: buffer[0],
-		UdpPort:     uint16(binary.BigEndian.Uint16(buffer[1:3])),
+		CommandType: 0,
+		UdpPort:     uint16(binary.BigEndian.Uint16(buffer)),
 	}
 	return msg, nil
 }
 
 func DeserializeWelcome(conn net.Conn) (*WelcomeMessage, error) {
 	buffer := make([]byte, WelcomeMessageSize)
-	_, err := conn.Read(buffer)
+	_, err := io.ReadFull(conn, buffer)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +97,7 @@ func DeserializeWelcome(conn net.Conn) (*WelcomeMessage, error) {
 
 func DeserializeAnnounce(conn net.Conn) (*AnnounceMessage, error) {
 	buffer := make([]byte, 1)
-	_, err := conn.Read(buffer)
+	_, err := io.ReadFull(conn, buffer)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +117,7 @@ func DeserializeAnnounce(conn net.Conn) (*AnnounceMessage, error) {
 
 func DeserializeInvalidCommand(conn net.Conn) (*InvalidCommandMessage, error) {
 	buffer := make([]byte, 1)
-	_, err := conn.Read(buffer)
+	_, err := io.ReadFull(conn, buffer)
 	if err != nil {
 		return nil, err
 	}
@@ -134,12 +136,14 @@ func DeserializeInvalidCommand(conn net.Conn) (*InvalidCommandMessage, error) {
 }
 
 func DeserializeServerMessage(conn net.Conn) (interface{}, error) {
+	conn.SetReadDeadline(time.Time{})
 	buffer := make([]byte, 1)
-	_, err := conn.Read(buffer)
+	_, err := io.ReadFull(conn, buffer)
 	if err != nil {
 		return nil, err
 	}
 	replyType := buffer[0]
+	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	switch replyType {
 	case 2:
 		return DeserializeWelcome(conn)
@@ -198,14 +202,19 @@ func SerializeAnnounce(m *AnnounceMessage) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-func DeserializeClientMessage(conn net.Conn) (interface{}, error) {
+func DeserializeClientMessage(conn net.Conn, isHandShake bool) (interface{}, error) {
+	if isHandShake {
+		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	} else {
+		conn.SetReadDeadline(time.Time{})
+	}
 	buffer := make([]byte, 1)
-	_, err := conn.Read(buffer)
+	_, err := io.ReadFull(conn, buffer)
 	if err != nil {
 		return nil, err
 	}
 	replyType := buffer[0]
-	
+	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	switch replyType {
 	case 0:
 		return DeserializeHello(conn)

@@ -71,9 +71,9 @@ func main() {
 	if err != nil {
 		fmt.Printf("Error starting udp port on server: %s", err)
 	}
-	for i, filename := range files {
-		stationList[i].name = filename
- 		go streamStation(i, filename, udpConn)
+	for i, path := range files {
+		stationList[i].name = path
+ 		go streamStation(i, path, udpConn)
 	}
 
 
@@ -102,12 +102,28 @@ func handleConnection(ci *WelcomeInfo) {
 	conn := ci.conn
 	files := ci.files
 	defer deleteClient(conn, true)
-	hello, err := protocol.DeserializeHello(conn)
+
+	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	msg, err := protocol.DeserializeClientMessage(conn, true)
 	if err != nil {
-		fmt.Println("Error reading message from client ", conn.RemoteAddr().String(), ": ", err)
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			fmt.Printf("Timeout from client %s, disconnecting", conn.RemoteAddr())
+			conn.Close()
+			return
+		} else {
+			fmt.Println("Error reading message from client ", conn.RemoteAddr().String(), ": ", err)
+			conn.Close()
+			return
+		}
+	}
+	conn.SetReadDeadline(time.Time{})
+	hello, ok := msg.(*protocol.HelloMessage)
+	if !ok {
+		fmt.Printf("Client Did Not Send Hello as First Message, Closing Connection")
+		conn.Close()
 		return
 	}
-
+	
 	tcpAddr := conn.RemoteAddr().(*net.TCPAddr)
 	udpAddr := &net.UDPAddr{
 		IP: tcpAddr.IP,
@@ -140,10 +156,13 @@ func handleConnection(ci *WelcomeInfo) {
 
 	//END SETUP CODE: ON TO MAIN HANDLING REQUESTS LOOP
 	for {
-		msg, err := protocol.DeserializeClientMessage(conn)
+		msg, err := protocol.DeserializeClientMessage(conn, false)
 		if err != nil || errors.Is(err, net.ErrClosed) {
 			if err == io.EOF {
 				fmt.Printf("Client %s disconnected, closing connection\n", conn.RemoteAddr())
+				return
+			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				fmt.Printf("Timeout error from client %s, clsosing connection\n", conn.RemoteAddr())
 				return
 			}
 			fmt.Printf("Error reading client message: %s", err)
@@ -234,6 +253,19 @@ func changeStation(conn net.Conn, newStationIndex int) {
 	newStationList.mutex.Lock()
 	newStationList.clients = append(newStationList.clients, client)
 	newStationList.mutex.Unlock()
+
+	announceMsg := &protocol.AnnounceMessage{
+		ReplyType: 3,
+		SongNameSize: uint8(len(newStationList.name)),
+		SongName: newStationList.name,
+	}
+
+	serializedMsg, err := protocol.SerializeAnnounce(announceMsg)
+	if err != nil {
+		fmt.Printf("Error serializing announce message: %s", err)
+		return
+	}
+	client.tcpConn.Write(serializedMsg)
 }
 
 func deleteClient(conn net.Conn, lockMutex bool) {
@@ -375,7 +407,7 @@ func formatStationString () string {
 	for i := range stationList {
 		station := &stationList[i]
 		station.mutex.Lock()
-		builder.WriteString(fmt.Sprintf("%d%s", i, station.name))
+		builder.WriteString(fmt.Sprintf("%d,%s", i, station.name))
 
 		for _, client := range station.clients {
 			builder.WriteString(fmt.Sprintf(",%s:%d", client.udpAddr.IP.String(), client.udpAddr.Port))
