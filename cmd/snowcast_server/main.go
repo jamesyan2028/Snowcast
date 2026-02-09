@@ -11,6 +11,7 @@ import (
 	"time"
 	"bufio"
 	"strings"
+	"errors"
 )
 
 //clientMap := make(map[string]int)
@@ -76,7 +77,6 @@ func main() {
 	}
 
 
-
 	go func() {
 		for {
 			tcpConn, err := listenConn.AcceptTCP()
@@ -98,10 +98,10 @@ func main() {
 
 
 func handleConnection(ci *WelcomeInfo) {
-	//clientMap[conn.RemoteAddr().String()] = -1
+	//SETUP CODE AND HANDSHAKE
 	conn := ci.conn
 	files := ci.files
-	defer conn.Close()
+	defer deleteClient(conn, true)
 	hello, err := protocol.DeserializeHello(conn)
 	if err != nil {
 		fmt.Println("Error reading message from client ", conn.RemoteAddr().String(), ": ", err)
@@ -122,8 +122,6 @@ func handleConnection(ci *WelcomeInfo) {
 
 	currentClients[conn] = currClient
 
-	//Add logic to make sure the message is valid later
-
 	welcome := &protocol.WelcomeMessage{
 		ReplyType:   2,
 		NumStations: uint16(len(files)),
@@ -139,14 +137,21 @@ func handleConnection(ci *WelcomeInfo) {
 		return
 	}
 	fmt.Println("Client Connected: ", conn.RemoteAddr().String())
+
+	//END SETUP CODE: ON TO MAIN HANDLING REQUESTS LOOP
 	for {
 		msg, err := protocol.DeserializeClientMessage(conn)
-		if err != nil {
+		if err != nil || errors.Is(err, net.ErrClosed) {
+			if err == io.EOF {
+				fmt.Printf("Client %s disconnected, closing connection\n", conn.RemoteAddr())
+				return
+			}
 			fmt.Printf("Error reading client message: %s", err)
-			continue
+			return
 		}
 		switch msgType := msg.(type) {
 		case *protocol.WelcomeMessage:
+			fmt.Printf("Received Second Welcome Message from client %s, terminating connection\n", conn.RemoteAddr())
 			response := &protocol.InvalidCommandMessage{
 				ReplyType: 4,
 				ReplyStringSize: 32,
@@ -154,17 +159,19 @@ func handleConnection(ci *WelcomeInfo) {
 			}
 			serializedMsg, err := protocol.SerializeInvalidMessage(response)
 			if err != nil {
-				fmt.Printf("Error serializing invalid message: %s", err)
+				fmt.Printf("Error serializing invalid message: %s\n", err)
 				continue
 			}
 			conn.Write(serializedMsg)
-			conn.Close()
+			fmt.Printf("Send Invalid Command Message to client %s, closing connection\n", conn.RemoteAddr())
 			return
 		case *protocol.SetStationMessage:
+			fmt.Printf("Received Message To Change Conection %s to station %d\n", conn.RemoteAddr(), msgType.StationNumber)
 			newStationNumber := msgType.StationNumber
 			if int(newStationNumber) < len(stationList) && int(newStationNumber) >= 0 {
 				changeStation(conn, int(newStationNumber))
 			} else {
+				fmt.Printf("Receieved Invalid Command from Client %s, Request To Change to Channel %d, Channel Does Not Exist\n", conn.RemoteAddr(), msgType.StationNumber)
 				response := &protocol.InvalidCommandMessage{
 					ReplyType: 4,
 					ReplyStringSize: 22,
@@ -176,10 +183,11 @@ func handleConnection(ci *WelcomeInfo) {
 					continue
 				}
 				conn.Write(serializedMsg)
-				conn.Close()
+				fmt.Printf("Sent Invalid Command Message to Client %s, Closing Connection\n", conn.RemoteAddr())
 				return
 			}
 		default:
+			fmt.Printf("Receieved Unknown Command from Client %s, Closing Connection\n", conn)
 			response := &protocol.InvalidCommandMessage{
 				ReplyType: 4,
 				ReplyStringSize: 20,
@@ -191,7 +199,7 @@ func handleConnection(ci *WelcomeInfo) {
 				continue
 			}
 			conn.Write(serializedMsg)
-			conn.Close()
+			fmt.Printf("Sent Invalid Command Message to Client %s, Closing Connection\n", conn.RemoteAddr())
 			return
 		}
 	}
@@ -228,10 +236,45 @@ func changeStation(conn net.Conn, newStationIndex int) {
 	newStationList.mutex.Unlock()
 }
 
+func deleteClient(conn net.Conn, lockMutex bool) {
+	if lockMutex {
+		clientMutex.Lock()
+	}
+	client, found := currentClients[conn]
+	if !found {
+		fmt.Printf("No client Found: %s", conn.RemoteAddr())
+		if lockMutex {
+			clientMutex.Unlock()
+		}
+		return
+	}
+	delete(currentClients, conn)
+	if lockMutex {
+		clientMutex.Unlock()
+	}
+
+
+	//Remove from active listeners array
+	if client.currStation != -1 {
+		oldStation := client.currStation
+		stationList := &stationList[oldStation]
+		stationList.mutex.Lock()
+		for i, c := range stationList.clients {
+			if c == client {
+				stationList.clients[i] = stationList.clients[len(stationList.clients) - 1]
+				stationList.clients = stationList.clients[:len(stationList.clients) - 1]
+				break
+			}
+		}
+		stationList.mutex.Unlock()
+	}
+	conn.Close()
+}
 func streamStation(id int, filename string, udpConn *net.UDPConn) {
 	file, err := os.Open(filename)
 	if err != nil {
 		fmt.Printf("Error opening file: " + "%s", filename)
+		return
 	}
 	defer file.Close()
 	buffer := make([]byte, 1500)
@@ -298,6 +341,7 @@ func handleUserInput() {
 				fmt.Printf("Invalid Command Type\n")
 			}
 		case "q":
+			//May be an error here if deleting while iterating through
 			clientMutex.Lock()
 			for conn, _ := range currentClients {
 				response := &protocol.InvalidCommandMessage{
@@ -310,7 +354,8 @@ func handleUserInput() {
 					fmt.Printf("Error shutting down connection: %s\n", err)
 				}
 				conn.Write(serializedMsg)
-				conn.Close()
+				deleteClient(conn, false)
+				fmt.Print("what the sigma")
 			}
 			clientMutex.Unlock()
 			os.Exit(0)

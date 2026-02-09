@@ -166,15 +166,16 @@ func SerializeSetStation(m *SetStationMessage) ([]byte, error) {
 }
 
 func DeserializeSetStation(conn net.Conn) (*SetStationMessage, error) {
-	buffer := make([]byte, SetStationMessageSize)
-	_, err := conn.Read(buffer)
+	//Made edits here since its only called in serialize station message
+	buffer := make([]byte, 2)
+	_, err := io.ReadFull(conn, buffer)
 	if err != nil {
 		return nil, err
 	}
 
 	msg := &SetStationMessage {
-		CommandType: buffer[0], 
-		StationNumber: uint16(binary.BigEndian.Uint16(buffer[1:])),
+		CommandType: 1, 
+		StationNumber: uint16(binary.BigEndian.Uint16(buffer)),
 	}
 
 	return msg, nil
@@ -190,7 +191,7 @@ func SerializeAnnounce(m *AnnounceMessage) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = binary.Write(buffer, binary.BigEndian, m.SongName)
+	err = binary.Write(buffer, binary.BigEndian, []byte(m.SongName))
 	if err != nil {
 		return nil, err
 	}
@@ -204,6 +205,7 @@ func DeserializeClientMessage(conn net.Conn) (interface{}, error) {
 		return nil, err
 	}
 	replyType := buffer[0]
+	
 	switch replyType {
 	case 0:
 		return DeserializeHello(conn)
@@ -224,7 +226,7 @@ func SerializeInvalidMessage(m *InvalidCommandMessage) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = binary.Write(buffer, binary.BigEndian, m.ReplyString)
+	err = binary.Write(buffer, binary.BigEndian, []byte(m.ReplyString))
 	if err != nil {
 		return nil, err
 	}

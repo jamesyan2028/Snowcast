@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"io"
+	"errors"
 )
 
 func main() {
@@ -72,7 +74,11 @@ func handleServerEvent(conn net.Conn) {
 	for {
 		msg, err := protocol.DeserializeServerMessage(conn)
 		if err != nil {
+			if err == io.EOF || errors.Is(err, net.ErrClosed){
+				return
+			}
 			fmt.Println("Error receiving server message: ", err)
+			return
 		}
 		switch msgType := msg.(type) {
 		case *protocol.WelcomeMessage:
