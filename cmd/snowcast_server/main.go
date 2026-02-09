@@ -9,6 +9,8 @@ import (
 	"snowcast-jamesyan2028/pkg/protocol"
 	"sync"
 	"time"
+	"bufio"
+	"strings"
 )
 
 //clientMap := make(map[string]int)
@@ -27,6 +29,7 @@ type ClientInfo struct {
 type Station struct {
 	mutex sync.Mutex
 	clients []*ClientInfo
+	name string
 }
 
 var (
@@ -68,23 +71,28 @@ func main() {
 		fmt.Printf("Error starting udp port on server: %s", err)
 	}
 	for i, filename := range files {
-		go streamStation(i, filename, udpConn)
+		stationList[i].name = filename
+ 		go streamStation(i, filename, udpConn)
 	}
 
-	for {
-		tcpConn, err := listenConn.AcceptTCP()
-		if err != nil {
-			fmt.Println("Error accepting connection: ", err)
-			continue
-		}
 
-		clientInfo := &WelcomeInfo{
-			conn: tcpConn,
-			files: files,
-		}
 
-		go handleConnection(clientInfo)
-	}
+	go func() {
+		for {
+			tcpConn, err := listenConn.AcceptTCP()
+			if err != nil {
+				fmt.Println("Error accepting connection: ", err)
+				continue
+			}
+			clientInfo := &WelcomeInfo{
+				conn: tcpConn,
+				files: files,
+			}
+			go handleConnection(clientInfo)
+		}
+	}()
+
+	handleUserInput()
 
 }
 
@@ -264,7 +272,71 @@ func streamStation(id int, filename string, udpConn *net.UDPConn) {
 		}
 
 	}
+}
 
+func handleUserInput() {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		input := scanner.Text()
+		input = strings.TrimSpace(input)
 
+		words := strings.Fields(input)
+		if len(words) == 0 {
+			continue
+		}
+		switch words[0] {
+		case "p":
+			if len(words) == 1 {
+				fmt.Print(formatStationString())
+			} else if len(words) == 2 {
+				fileName := words[1]
+				err := os.WriteFile(fileName, []byte(formatStationString()), 0644)
+				if err != nil {
+					fmt.Printf("Error writing output to file: %s", err)
+				}
+			} else {
+				fmt.Printf("Invalid Command Type\n")
+			}
+		case "q":
+			clientMutex.Lock()
+			for conn, _ := range currentClients {
+				response := &protocol.InvalidCommandMessage{
+					ReplyType: 4, 
+					ReplyStringSize: 43,
+					ReplyString: "Server Shutting Down, Close All Connections", 
+				}
+				serializedMsg, err := protocol.SerializeInvalidMessage(response)
+				if err != nil {
+					fmt.Printf("Error shutting down connection: %s\n", err)
+				}
+				conn.Write(serializedMsg)
+				conn.Close()
+			}
+			clientMutex.Unlock()
+			os.Exit(0)
+			return
+		default:
+			fmt.Printf("Invalid command\n")
+		} 
 
+	}
+}
+
+func formatStationString () string {
+	var builder strings.Builder
+	clientMutex.Lock()
+	defer clientMutex.Unlock()
+
+	for i := range stationList {
+		station := &stationList[i]
+		station.mutex.Lock()
+		builder.WriteString(fmt.Sprintf("%d%s", i, station.name))
+
+		for _, client := range station.clients {
+			builder.WriteString(fmt.Sprintf(",%s:%d", client.udpAddr.IP.String(), client.udpAddr.Port))
+		}
+		builder.WriteString("\n")
+		station.mutex.Unlock()
+	}
+	return builder.String()
 }
