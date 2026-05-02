@@ -10,6 +10,12 @@ info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
+# Navigate to project root (directory containing go.mod)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR" && while [ ! -f go.mod ]; do cd ..; done && pwd)"
+cd "$PROJECT_ROOT"
+info "Project root: $PROJECT_ROOT"
+
 # Check Go is installed
 if ! command -v go &> /dev/null; then
     error "Go is not installed. Please install Go first: https://go.dev/dl/"

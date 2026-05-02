@@ -1,5 +1,5 @@
 package protocol
-
+/*
 import (
 	"bytes"
 	"encoding/binary"
@@ -242,3 +242,4 @@ func SerializeInvalidMessage(m *InvalidCommandMessage) ([]byte, error) {
 	return buffer.Bytes(), nil
 
 }
+*/

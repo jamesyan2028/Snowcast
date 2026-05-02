@@ -1,5 +1,43 @@
 syntax = "proto3";
 
-package protocol
-option go_package = "./pb"
+package protocol;
+option go_package = "snowcast-jamesyan2028/pkg/protocol";
 
+message HelloMessage {
+    uint32 udp_port = 1;
+}
+
+message SetStationMessage {
+    uint32 station_number = 1;
+}
+
+message WelcomeMessage {
+    uint32 num_stations = 1;
+}
+
+message AnnounceMessage {
+    string song_name = 1;
+}
+
+message InvalidCommandMessage {
+    string reply_string = 1;
+}
+
+message DisconnectRequest {}
+
+message DisconnectResponse {
+    bool success = 1;
+}
+
+message ServerEvent {
+    oneof event {
+        AnnounceMessage announce = 1;
+        InvalidCommandMessage invalid = 2;
+    }
+}
+
+service SnowcastControl {
+    rpc Handshake(HelloMessage) returns (WelcomeMessage);
+    rpc SetStation(SetStationMessage) returns (stream ServerEvent);
+    rpc Disconnect(DisconnectRequest) returns (DisconnectResponse);
+}
