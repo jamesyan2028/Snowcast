@@ -38,7 +38,7 @@ func main() {
 		return
 	}
 
-	conn, err := grpc.Dial(clientIP+":"+clientPort, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(clientIP+":"+clientPort, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("Error connecting to server: %v", err)
 	}
