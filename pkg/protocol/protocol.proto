@@ -9,6 +9,7 @@ message HelloMessage {
 
 message SetStationMessage {
     uint32 station_number = 1;
+    uint32 udp_port = 2;
 }
 
 message WelcomeMessage {
@@ -23,7 +24,9 @@ message InvalidCommandMessage {
     string reply_string = 1;
 }
 
-message DisconnectRequest {}
+message DisconnectRequest {
+    uint32 udp_port = 2;
+}
 
 message DisconnectResponse {
     bool success = 1;

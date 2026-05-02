@@ -2,118 +2,79 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"io"
 	"log"
-	"net"
 	"os"
-	"snowcast-jamesyan2028/pkg/protocol"
 	"strconv"
 	"strings"
-	"unicode"
-	"io"
-	"errors"
 	"time"
+	"unicode"
+
+	pb "snowcast-jamesyan2028/pkg/protocol"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-var joinedStation bool = false
+var (
+	joinedStation bool = false
+	listenerPort  uint64
+)
 
 func main() {
 	if len(os.Args) != 4 {
 		log.Fatalf("Usage: ./snowcast_control <server IP> <server port> <listener_port>")
 		return
 	}
-	controlIP := os.Args[1]
-	controlPort := os.Args[2]
-	listenerPort, err := strconv.ParseUint(os.Args[3], 10, 16)
+	clientIP := os.Args[1]
+	clientPort := os.Args[2]
+
+	var err error
+	listenerPort, err = strconv.ParseUint(os.Args[3], 10, 16)
 	if err != nil {
 		log.Fatalf("Error parsing listener port: %v", err)
 		return
 	}
 
-	conn, err := net.Dial("tcp", controlIP+":"+controlPort)
+	conn, err := grpc.Dial(clientIP+":"+clientPort, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		fmt.Println("error connecting to server: ", err)
-		return
+		log.Fatalf("Error connecting to server: %v", err)
 	}
-	hello := &protocol.HelloMessage{
-		CommandType: 0,
-		UdpPort:     uint16(listenerPort),
-	}
-	serializedHello, err := hello.SerializeHello()
-	if err != nil {
-		fmt.Println("Error serializing hello message: ", err)
-		return
-	}
-	_, err = conn.Write(serializedHello)
-	if err != nil {
-		fmt.Println("Error sending hello message to server: ", err)
-		return
+	defer conn.Close()
+
+	client := pb.NewSnowcastControlClient(conn)
+
+	hello := &pb.HelloMessage{
+		UdpPort: uint32(listenerPort),
 	}
 
-	conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-	welcomeMessage, err := protocol.DeserializeWelcome(conn)
-	if err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			fmt.Printf("Timeout from client %s, disconnecting", conn.RemoteAddr())
-			return
-		}
-		fmt.Println("Error receiving welcome message from server: ", err)
-		return
-	}
-	conn.SetReadDeadline(time.Time{})
-	fmt.Printf("Welcome to Snowcast! The server has %d stations\n", welcomeMessage.NumStations)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
+	welcome, err := client.Handshake(ctx, hello)
+
+	if err != nil {
+		log.Fatalf("Handshake failed: %v", err)
+	}
+	fmt.Printf("Welcome to Snowcast! The server has %d stations\n", welcome.NumStations)
+ 
 	exit := make(chan bool)
 
 	go func() {
-		handleServerEvent(conn)
-		exit <- true
-	}()
-
-	go func() {
-		handleUserInput(conn)
+		handleUserInput(client)
 		exit <- true
 	}()
 
 	<- exit
 
-	conn.Close()
+	client.Disconnect(context.Background(), &pb.DisconnectRequest{
+		UdpPort: uint32(listenerPort),
+	})
 }
 
-func handleServerEvent(conn net.Conn) {
-	for {
-		msg, err := protocol.DeserializeServerMessage(conn)
-		if err != nil {
-			if err == io.EOF || errors.Is(err, net.ErrClosed){
-				return
-			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				fmt.Printf("Timeout error from server %s, disconnecting from server\n", conn.RemoteAddr())
-				return
-			}
-			fmt.Println("Error receiving server message: ", err)
-			return
-		}
-		switch msgType := msg.(type) {
-		case *protocol.WelcomeMessage:
-			fmt.Print("Received Unexpected Second Welcome Message, Disconnecting\n")
-			return
-		case *protocol.AnnounceMessage:
-			if !joinedStation {
-				fmt.Print("Received Announce Message Before Joining Station, closing connection")
-				return
-			}
-			fmt.Printf("New Song Announced: %s\n", msgType.SongName)
-		case *protocol.InvalidCommandMessage:
-			fmt.Printf("Invalid Command: %s\n", msgType.ReplyString)
-			return
-		default:
-			fmt.Printf("Unknown message type received: %s\n", msg)
-			return
-		}
-	}
-}
-
-func handleUserInput(conn net.Conn) {
+func handleUserInput(client pb.SnowcastControlClient) {
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		input := scanner.Text()
@@ -129,21 +90,42 @@ func handleUserInput(conn net.Conn) {
 				fmt.Printf("Error Parsing Station Number: %s\n", err)
 			}
 
-			setStationMessage := &protocol.SetStationMessage{
-				CommandType: 1,
-				StationNumber: uint16(stationNum),
-			}
+			stream, err := client.SetStation(context.Background(), &pb.SetStationMessage{
+				StationNumber: uint32(stationNum),
+				UdpPort:       uint32(listenerPort),
+			})
 
-			serializedMessage, err := protocol.SerializeSetStation(setStationMessage)
 			if err != nil {
-				fmt.Printf("Error serializing Message: " + "%s", err)
+				fmt.Printf("Error setting station: %v\n", err)
 				continue
 			}
+
 			joinedStation = true
-			conn.Write(serializedMessage)
+			handleServerStream(stream)
 		default:
 			fmt.Printf("Invalid Command: %s\n", input)
 			continue
+		}
+	}
+}
+
+func handleServerStream(stream pb.SnowcastControl_SetStationClient) {
+	for {
+		event, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				return
+			}
+			fmt.Printf("Stream error: %v\n", err)
+			return
+		}
+ 
+		switch evt := event.Event.(type) {
+		case *pb.ServerEvent_Announce:
+			fmt.Printf("New Song Announced: %s\n", evt.Announce.SongName)
+		case *pb.ServerEvent_Invalid:
+			fmt.Printf("Invalid Command: %s\n", evt.Invalid.ReplyString)
+			return
 		}
 	}
 }
