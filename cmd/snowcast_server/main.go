@@ -168,7 +168,7 @@ func handleUserInput(grpcServer *grpc.Server) {
 		} 
 
 	}
-	//select {}
+	select {}
 }
 
 func formatStationString () string {
