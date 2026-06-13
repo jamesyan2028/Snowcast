@@ -1,16 +1,16 @@
-package wal
+package tests
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
 	pb "snowcast-jamesyan2028/pkg/protocol"
+	"snowcast-jamesyan2028/pkg/wal"
 )
 
-func TestAppendAndReadAll(t *testing.T) {
+func TestWalAppendAndReadAll(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.wal")
-	log, err := Open(path)
+	log, err := wal.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestAppendAndReadAll(t *testing.T) {
 		t.Fatalf("unexpected entries: %+v", entries)
 	}
 
-	log2, err := Open(path)
+	log2, err := wal.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,11 +47,10 @@ func TestAppendAndReadAll(t *testing.T) {
 	}
 }
 
-func TestAppendIncrementsSeq(t *testing.T) {
-	path := filepath.Join(os.TempDir(), "snowcast-wal-test-increment.wal")
-	defer os.Remove(path)
+func TestWalAppendIncrementsSeq(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "increment.wal")
 
-	log, err := Open(path)
+	log, err := wal.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

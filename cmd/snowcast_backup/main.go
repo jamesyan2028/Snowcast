@@ -259,7 +259,7 @@ func promote(cfg backupConfig, srv *replicationServer, grpcServer *grpc.Server, 
 
 	grpcServer.GracefulStop()
 
-	_, err = runtime.Setrve(cfg.clientPort, cfg.stationFiles, local)
+	_, err = runtime.Serve(cfg.clientPort, cfg.stationFiles, local)
 	if err != nil {
 		log.Fatalf("serve promoted primary: %v", err)
 	}
