@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v3.21.12
-// source: protocol.proto
+// source: pkg/protocol/protocol.proto
 
 package protocol
 
@@ -22,6 +22,7 @@ const (
 	SnowcastControl_Handshake_FullMethodName  = "/protocol.SnowcastControl/Handshake"
 	SnowcastControl_SetStation_FullMethodName = "/protocol.SnowcastControl/SetStation"
 	SnowcastControl_Disconnect_FullMethodName = "/protocol.SnowcastControl/Disconnect"
+	SnowcastControl_Health_FullMethodName     = "/protocol.SnowcastControl/Health"
 )
 
 // SnowcastControlClient is the client API for SnowcastControl service.
@@ -31,6 +32,7 @@ type SnowcastControlClient interface {
 	Handshake(ctx context.Context, in *HelloMessage, opts ...grpc.CallOption) (*WelcomeMessage, error)
 	SetStation(ctx context.Context, in *SetStationMessage, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ServerEvent], error)
 	Disconnect(ctx context.Context, in *DisconnectRequest, opts ...grpc.CallOption) (*DisconnectResponse, error)
+	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 }
 
 type snowcastControlClient struct {
@@ -80,6 +82,16 @@ func (c *snowcastControlClient) Disconnect(ctx context.Context, in *DisconnectRe
 	return out, nil
 }
 
+func (c *snowcastControlClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HealthResponse)
+	err := c.cc.Invoke(ctx, SnowcastControl_Health_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SnowcastControlServer is the server API for SnowcastControl service.
 // All implementations must embed UnimplementedSnowcastControlServer
 // for forward compatibility.
@@ -87,6 +99,7 @@ type SnowcastControlServer interface {
 	Handshake(context.Context, *HelloMessage) (*WelcomeMessage, error)
 	SetStation(*SetStationMessage, grpc.ServerStreamingServer[ServerEvent]) error
 	Disconnect(context.Context, *DisconnectRequest) (*DisconnectResponse, error)
+	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	mustEmbedUnimplementedSnowcastControlServer()
 }
 
@@ -105,6 +118,9 @@ func (UnimplementedSnowcastControlServer) SetStation(*SetStationMessage, grpc.Se
 }
 func (UnimplementedSnowcastControlServer) Disconnect(context.Context, *DisconnectRequest) (*DisconnectResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Disconnect not implemented")
+}
+func (UnimplementedSnowcastControlServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
 }
 func (UnimplementedSnowcastControlServer) mustEmbedUnimplementedSnowcastControlServer() {}
 func (UnimplementedSnowcastControlServer) testEmbeddedByValue()                         {}
@@ -174,6 +190,24 @@ func _SnowcastControl_Disconnect_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SnowcastControl_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HealthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SnowcastControlServer).Health(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SnowcastControl_Health_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SnowcastControlServer).Health(ctx, req.(*HealthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SnowcastControl_ServiceDesc is the grpc.ServiceDesc for SnowcastControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -189,6 +223,10 @@ var SnowcastControl_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Disconnect",
 			Handler:    _SnowcastControl_Disconnect_Handler,
 		},
+		{
+			MethodName: "Health",
+			Handler:    _SnowcastControl_Health_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -197,5 +235,145 @@ var SnowcastControl_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "protocol.proto",
+	Metadata: "pkg/protocol/protocol.proto",
+}
+
+const (
+	SnowcastReplication_Replicate_FullMethodName = "/protocol.SnowcastReplication/Replicate"
+	SnowcastReplication_Ping_FullMethodName      = "/protocol.SnowcastReplication/Ping"
+)
+
+// SnowcastReplicationClient is the client API for SnowcastReplication service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type SnowcastReplicationClient interface {
+	Replicate(ctx context.Context, in *ReplicateRequest, opts ...grpc.CallOption) (*ReplicateResponse, error)
+	Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error)
+}
+
+type snowcastReplicationClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewSnowcastReplicationClient(cc grpc.ClientConnInterface) SnowcastReplicationClient {
+	return &snowcastReplicationClient{cc}
+}
+
+func (c *snowcastReplicationClient) Replicate(ctx context.Context, in *ReplicateRequest, opts ...grpc.CallOption) (*ReplicateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReplicateResponse)
+	err := c.cc.Invoke(ctx, SnowcastReplication_Replicate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *snowcastReplicationClient) Ping(ctx context.Context, in *PingRequest, opts ...grpc.CallOption) (*PingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PingResponse)
+	err := c.cc.Invoke(ctx, SnowcastReplication_Ping_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SnowcastReplicationServer is the server API for SnowcastReplication service.
+// All implementations must embed UnimplementedSnowcastReplicationServer
+// for forward compatibility.
+type SnowcastReplicationServer interface {
+	Replicate(context.Context, *ReplicateRequest) (*ReplicateResponse, error)
+	Ping(context.Context, *PingRequest) (*PingResponse, error)
+	mustEmbedUnimplementedSnowcastReplicationServer()
+}
+
+// UnimplementedSnowcastReplicationServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedSnowcastReplicationServer struct{}
+
+func (UnimplementedSnowcastReplicationServer) Replicate(context.Context, *ReplicateRequest) (*ReplicateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Replicate not implemented")
+}
+func (UnimplementedSnowcastReplicationServer) Ping(context.Context, *PingRequest) (*PingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Ping not implemented")
+}
+func (UnimplementedSnowcastReplicationServer) mustEmbedUnimplementedSnowcastReplicationServer() {}
+func (UnimplementedSnowcastReplicationServer) testEmbeddedByValue()                             {}
+
+// UnsafeSnowcastReplicationServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to SnowcastReplicationServer will
+// result in compilation errors.
+type UnsafeSnowcastReplicationServer interface {
+	mustEmbedUnimplementedSnowcastReplicationServer()
+}
+
+func RegisterSnowcastReplicationServer(s grpc.ServiceRegistrar, srv SnowcastReplicationServer) {
+	// If the following call panics, it indicates UnimplementedSnowcastReplicationServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&SnowcastReplication_ServiceDesc, srv)
+}
+
+func _SnowcastReplication_Replicate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SnowcastReplicationServer).Replicate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SnowcastReplication_Replicate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SnowcastReplicationServer).Replicate(ctx, req.(*ReplicateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SnowcastReplication_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SnowcastReplicationServer).Ping(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SnowcastReplication_Ping_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SnowcastReplicationServer).Ping(ctx, req.(*PingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// SnowcastReplication_ServiceDesc is the grpc.ServiceDesc for SnowcastReplication service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var SnowcastReplication_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "protocol.SnowcastReplication",
+	HandlerType: (*SnowcastReplicationServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Replicate",
+			Handler:    _SnowcastReplication_Replicate_Handler,
+		},
+		{
+			MethodName: "Ping",
+			Handler:    _SnowcastReplication_Ping_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "pkg/protocol/protocol.proto",
 }

@@ -39,8 +39,64 @@ message ServerEvent {
     }
 }
 
+message HealthRequest {}
+
+message HealthResponse {
+    bool ok = 1;
+}
+
 service SnowcastControl {
     rpc Handshake(HelloMessage) returns (WelcomeMessage);
     rpc SetStation(SetStationMessage) returns (stream ServerEvent);
     rpc Disconnect(DisconnectRequest) returns (DisconnectResponse);
+    rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+//Following datastructures are stored in WAL
+
+message HandshakeOp {
+    string client_ip = 1;
+    uint32 udp_port = 2;
+}
+
+message SetStationOp {
+    string client_ip = 1;
+    uint32 udp_port = 2;
+    int32 station_number = 3;
+    int32 previous_station = 4;
+}
+
+message DisconnectOp {
+    string client_ip = 1;
+    uint32 udp_port = 2;
+}
+
+message WalEntry {
+    uint64 seq = 1;
+    oneof op {
+        HandshakeOp handshake = 2;
+        SetStationOp set_station = 3;
+        DisconnectOp disconnect = 4;
+    }
+}
+
+message ReplicateRequest {
+    WalEntry entry = 1;
+}
+
+message ReplicateResponse {
+    uint64 seq = 1;
+    bool ok = 2;
+    string error = 3;
+}
+
+message PingRequest {}
+
+message PingResponse {
+    uint64 last_wal_seq = 1;
+}
+
+service SnowcastReplication {
+    rpc Replicate(ReplicateRequest) returns (ReplicateResponse);
+    rpc Ping(PingRequest) returns (PingResponse);
 }
