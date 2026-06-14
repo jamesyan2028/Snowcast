@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"snowcast-jamesyan2028/internal/control"
@@ -18,8 +19,16 @@ import (
 	"google.golang.org/grpc"
 )
 
+// Server runs client-facing gRPC control and UDP streaming.
+type Server struct {
+	grpc    *grpc.Server
+	udpConn *net.UDPConn
+	mu      sync.Mutex
+	stopped bool
+}
+
 // Serve starts UDP streaming and gRPC control on port.
-func Serve(port string, files []string, repl control.Replicator) (*grpc.Server, error) {
+func Serve(port string, files []string, repl control.Replicator) (*Server, error) {
 	udpAddr, err := net.ResolveUDPAddr("udp", "0.0.0.0:"+port)
 	if err != nil {
 		return nil, fmt.Errorf("udp addr: %w", err)
@@ -35,6 +44,7 @@ func Serve(port string, files []string, repl control.Replicator) (*grpc.Server, 
 
 	listen, err := net.Listen("tcp", ":"+port)
 	if err != nil {
+		udpConn.Close()
 		return nil, fmt.Errorf("tcp listen: %w", err)
 	}
 
@@ -44,14 +54,40 @@ func Serve(port string, files []string, repl control.Replicator) (*grpc.Server, 
 		Repl:        repl,
 	})
 
+	s := &Server{grpc: grpcServer, udpConn: udpConn}
+
 	go func() {
 		if err := grpcServer.Serve(listen); err != nil {
-			log.Fatalf("Failed to serve gRPC: %v", err)
+			log.Printf("gRPC serve ended: %v", err)
 		}
 	}()
 
 	fmt.Printf("Snowcast server started on port %s with %d stations\n", port, len(files))
-	return grpcServer, nil
+	return s, nil
+}
+
+// Stop gracefully stops client serving.
+func (s *Server) Stop() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return
+	}
+	s.stopped = true
+	s.mu.Unlock()
+
+	s.grpc.GracefulStop()
+	if s.udpConn != nil {
+		s.udpConn.Close()
+	}
+}
+
+// GRPC returns the underlying gRPC server (for CLI shutdown).
+func (s *Server) GRPC() *grpc.Server {
+	return s.grpc
 }
 
 func streamStation(id int, filename string, udpConn *net.UDPConn) {
@@ -102,7 +138,7 @@ func streamStation(id int, filename string, udpConn *net.UDPConn) {
 }
 
 // HandleUserInput runs the server CLI until quit.
-func HandleUserInput(grpcServer *grpc.Server) {
+func HandleUserInput(s *Server) {
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		input := strings.TrimSpace(scanner.Text())
@@ -128,7 +164,7 @@ func HandleUserInput(grpcServer *grpc.Server) {
 				delete(state.CurrentClients, key)
 			}
 			state.ClientMutex.Unlock()
-			grpcServer.GracefulStop()
+			s.Stop()
 			os.Exit(0)
 		default:
 			fmt.Printf("Invalid command\n")

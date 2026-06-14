@@ -55,10 +55,22 @@ func Start(walPath, backupAddr string) error {
 	if err != nil {
 		return fmt.Errorf("open wal: %w", err)
 	}
+	return StartWithWal(w, backupAddr)
+}
 
-	conn, err := dialBackup(backupAddr)
+// StartWithWal uses an already-open WAL as leader outbound replication coordinator.
+func StartWithWal(w *wal.Log, backupAddr string) error {
+	return startWithWal(w, backupAddr, backupReadyTimeout)
+}
+
+// StartWithWalTimeout is like StartWithWal with a custom readiness timeout.
+func StartWithWalTimeout(w *wal.Log, backupAddr string, readyTimeout time.Duration) error {
+	return startWithWal(w, backupAddr, readyTimeout)
+}
+
+func startWithWal(w *wal.Log, backupAddr string, readyTimeout time.Duration) error {
+	conn, err := dialBackup(backupAddr, readyTimeout)
 	if err != nil {
-		w.Close()
 		return err
 	}
 
@@ -69,20 +81,28 @@ func Start(walPath, backupAddr string) error {
 	}
 
 	if err := global.recoverPrimary(); err != nil {
-		global.Shutdown()
+		global.ShutdownClient()
 		return fmt.Errorf("wal recover primary: %w", err)
 	}
 	if err := global.syncBackupWal(); err != nil {
-		global.Shutdown()
+		global.ShutdownClient()
 		return fmt.Errorf("sync backup wal: %w", err)
 	}
 
-	log.Printf("Backup ready at %s (WAL: %s)", backupAddr, walPath)
+	log.Printf("Backup ready at %s", backupAddr)
 	return nil
 }
 
-func dialBackup(backupAddr string) (*grpc.ClientConn, error) {
-	deadline := time.Now().Add(backupReadyTimeout)
+// WAL returns the coordinator WAL handle.
+func (c *Coordinator) WAL() *wal.Log {
+	if c == nil {
+		return nil
+	}
+	return c.wal
+}
+
+func dialBackup(backupAddr string, readyTimeout time.Duration) (*grpc.ClientConn, error) {
+	deadline := time.Now().Add(readyTimeout)
 	for time.Now().Before(deadline) {
 		conn, err := grpc.NewClient(backupAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil { //error creating gRPC client for some reason
@@ -208,18 +228,35 @@ func (c *Coordinator) replicate(ctx context.Context, entry *pb.WalEntry) error {
 	return nil
 }
 
-// Shutdown closes backup connection and WAL.
-func (c *Coordinator) Shutdown() {
+// ShutdownClient closes the outbound replication client but keeps the WAL open.
+func (c *Coordinator) ShutdownClient() {
 	if c == nil {
 		return
 	}
 	if c.conn != nil {
 		c.conn.Close()
-	}
-	if c.wal != nil {
-		c.wal.Close()
+		c.conn = nil
 	}
 	if global == c {
 		global = nil
+	}
+}
+
+// Shutdown closes backup connection and WAL.
+func (c *Coordinator) Shutdown() {
+	if c == nil {
+		return
+	}
+	c.ShutdownClient()
+	if c.wal != nil {
+		c.wal.Close()
+		c.wal = nil
+	}
+}
+
+// ShutdownGlobal shuts down the active coordinator.
+func ShutdownGlobal() {
+	if global != nil {
+		global.ShutdownClient()
 	}
 }

@@ -3,23 +3,27 @@ package main
 import (
 	"flag"
 	"log"
+	"time"
 
+	"snowcast-jamesyan2028/internal/node"
 	"snowcast-jamesyan2028/internal/replication"
-	"snowcast-jamesyan2028/internal/runtime"
-	"snowcast-jamesyan2028/internal/state"
 )
 
 func main() {
-	backupAddr := flag.String("backup-addr", "", "backup replication gRPC address (required), e.g. 127.0.0.1:16801")
+	etcdEndpoints := flag.String("etcd-endpoints", "", "etcd endpoints (required), e.g. 127.0.0.1:2379")
+	etcdKey := flag.String("etcd-key", "", "etcd primary key (default /snowcast/primary)")
+	leaseTTL := flag.Int64("lease-ttl", 5, "etcd lease TTL in seconds")
+	backupAddr := flag.String("backup-addr", "", "backup replication address (required), e.g. 127.0.0.1:16801")
+	replPort := flag.String("repl-port", "", "replication port when demoted to standby (required), e.g. 16801")
 	walPath := flag.String("wal", "", "primary WAL file path (default: /tmp/snowcast-<port>.wal)")
 	flag.Parse()
 
 	args := flag.Args()
-	if *backupAddr == "" {
-		log.Fatal("Usage: ./snowcast_server --backup-addr <host:port> [--wal <path>] <listen_port> <file0> [file1] ...")
+	if *etcdEndpoints == "" || *backupAddr == "" || *replPort == "" {
+		log.Fatal("Usage: ./snowcast_server --etcd-endpoints <host:port> --backup-addr <host:port> --repl-port <port> [--wal <path>] <listen_port> <file0> ...")
 	}
 	if len(args) < 2 {
-		log.Fatal("Usage: ./snowcast_server --backup-addr <host:port> [--wal <path>] <listen_port> <file0> [file1] ...")
+		log.Fatal("Usage: ./snowcast_server --etcd-endpoints <host:port> --backup-addr <host:port> --repl-port <port> [--wal <path>] <listen_port> <file0> ...")
 	}
 
 	port := args[0]
@@ -29,18 +33,23 @@ func main() {
 		*walPath = replication.DefaultWalPath(port)
 	}
 
-	state.InitStations(files)
-
-	if err := replication.Start(*walPath, *backupAddr); err != nil {
-		log.Fatalf("Failed to start replication: %v", err)
-	}
-	defer replication.Global().Shutdown()
-
-	coord := replication.Global()
-	grpcServer, err := runtime.Serve(port, files, coord)
+	mgr, err := node.New(node.Config{
+		EtcdEndpoints: *etcdEndpoints,
+		EtcdKey:       *etcdKey,
+		LeaseTTL:      *leaseTTL,
+		LeasePoll:     time.Second,
+		ClientPort:    port,
+		ReplPort:      *replPort,
+		BackupAddr:    *backupAddr,
+		WalPath:       *walPath,
+		Files:         files,
+	})
 	if err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+		log.Fatalf("Failed to init node: %v", err)
 	}
+	defer mgr.Close()
 
-	runtime.HandleUserInput(grpcServer)
+	if err := mgr.RunAsLeader(); err != nil {
+		log.Fatalf("Failed to run as leader: %v", err)
+	}
 }
