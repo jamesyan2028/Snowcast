@@ -6,14 +6,14 @@ import (
 
 	pb "snowcast-jamesyan2028/pkg/protocol"
 	"snowcast-jamesyan2028/pkg/wal"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestWalAppendAndReadAll(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.wal")
 	log, err := wal.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer log.Close()
 
 	entry := &pb.WalEntry{
@@ -22,38 +22,25 @@ func TestWalAppendAndReadAll(t *testing.T) {
 		},
 	}
 	seq, err := log.Append(entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if seq != 1 {
-		t.Fatalf("expected seq 1, got %d", seq)
-	}
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), seq)
 
 	entries, err := log.ReadAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 || entries[0].Seq != 1 {
-		t.Fatalf("unexpected entries: %+v", entries)
-	}
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, uint64(1), entries[0].Seq)
 
 	log2, err := wal.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer log2.Close()
-	if log2.LastSeq() != 1 {
-		t.Fatalf("expected LastSeq 1, got %d", log2.LastSeq())
-	}
+	require.Equal(t, uint64(1), log2.LastSeq())
 }
 
 func TestWalAppendIncrementsSeq(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "increment.wal")
 
 	log, err := wal.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer log.Close()
 
 	for i := uint64(1); i <= 3; i++ {
@@ -62,11 +49,8 @@ func TestWalAppendIncrementsSeq(t *testing.T) {
 				Disconnect: &pb.DisconnectOp{ClientIp: "127.0.0.1", UdpPort: uint32(i)},
 			},
 		})
-		if err != nil || seq != i {
-			t.Fatalf("append %d: seq=%d err=%v", i, seq, err)
-		}
+		require.NoError(t, err)
+		require.Equal(t, i, seq)
 	}
-	if log.LastSeq() != 3 {
-		t.Fatalf("LastSeq=%d", log.LastSeq())
-	}
+	require.Equal(t, uint64(3), log.LastSeq())
 }

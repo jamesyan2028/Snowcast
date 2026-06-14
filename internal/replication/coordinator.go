@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"snowcast-jamesyan2028/internal/bench"
 	"snowcast-jamesyan2028/internal/state"
 	"snowcast-jamesyan2028/pkg/wal"
 
@@ -125,6 +126,7 @@ func dialBackup(backupAddr string, readyTimeout time.Duration) (*grpc.ClientConn
 
 //Restore in memory state from primary WAL
 func (c *Coordinator) recoverPrimary() error {
+	start := time.Now()
 	entries, err := c.wal.ReadAll()
 	if err != nil {
 		return err
@@ -134,6 +136,7 @@ func (c *Coordinator) recoverPrimary() error {
 			return fmt.Errorf("recover seq %d: %w", entry.Seq, err)
 		}
 	}
+	bench.Mark("setup_wal_replay", start)
 	return nil
 }
 

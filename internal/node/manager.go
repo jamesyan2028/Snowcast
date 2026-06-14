@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"snowcast-jamesyan2028/internal/bench"
 	"snowcast-jamesyan2028/internal/leadership"
 	"snowcast-jamesyan2028/internal/replication"
 	"snowcast-jamesyan2028/internal/runtime"
@@ -206,6 +207,8 @@ func (m *Manager) promoteToLeader(session *leadership.Session) error {
 	m.mu.Unlock()
 
 	log.Printf("Promoting to leader on port %s", m.cfg.ClientPort)
+	promoteStart := time.Now()
+	bench.MarkInstant("failover_promote_start")
 
 	m.mu.Lock()
 	m.session = session
@@ -221,6 +224,7 @@ func (m *Manager) promoteToLeader(session *leadership.Session) error {
 		m.replServer = nil
 	}
 
+	walReplayStart := time.Now()
 	entries, err := m.wal.ReadAll()
 	if err != nil {
 		return err
@@ -231,7 +235,9 @@ func (m *Manager) promoteToLeader(session *leadership.Session) error {
 			return fmt.Errorf("apply wal seq %d: %w", entry.Seq, err)
 		}
 	}
+	bench.Mark("failover_wal_replay", walReplayStart)
 
+	grpcStartupStart := time.Now()
 	replTarget := m.cfg.BackupAddr
 	if replTarget != "" {
 		if err := replication.StartWithWalTimeout(m.wal, replTarget, 2*time.Second); err != nil {
@@ -258,6 +264,9 @@ func (m *Manager) promoteToLeader(session *leadership.Session) error {
 	m.mu.Lock()
 	m.clientSrv = clientSrv
 	m.mu.Unlock()
+
+	bench.Mark("failover_grpc_startup", grpcStartupStart)
+	bench.Mark("failover_promote_total", promoteStart)
 
 	log.Printf("Promoted to leader on port %s", m.cfg.ClientPort)
 	select {}
