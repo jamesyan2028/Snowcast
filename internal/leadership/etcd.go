@@ -12,7 +12,7 @@ const DefaultKey = "/snowcast/primary"
 
 // Session holds an etcd lease tied to the primary registration key.
 type Session struct {
-	client  *clientv3.Client
+	client  *clientv3.Client //connection to etcd server process
 	leaseID clientv3.LeaseID
 	key     string
 	value   string
@@ -22,12 +22,12 @@ type Session struct {
 // NewClient connects to etcd.
 func NewClient(endpoints string) (*clientv3.Client, error) {
 	return clientv3.New(clientv3.Config{
-		Endpoints:   []string{endpoints},
+		Endpoints:   []string{endpoints}, //lists etcd endpoints clients can connect to, in this case just 127.0.0.1:2379
 		DialTimeout: 5 * time.Second,
 	})
 }
 
-// Acquire grants a lease and creates key if absent.
+// grants a lease and creates key if absent. Only called on startup
 func Acquire(ctx context.Context, client *clientv3.Client, key, value string, ttl int64) (*Session, error) {
 	s, ok, err := TryAcquire(ctx, client, key, value, ttl)
 	if err != nil {
@@ -39,7 +39,7 @@ func Acquire(ctx context.Context, client *clientv3.Client, key, value string, tt
 	return s, nil
 }
 
-// TryAcquire attempts to become primary; returns ok=false if key exists.
+// Called when a server attempts to become primary; returns ok=false if key exists.
 func TryAcquire(ctx context.Context, client *clientv3.Client, key, value string, ttl int64) (*Session, bool, error) {
 	lease, err := client.Grant(ctx, ttl)
 	if err != nil {
@@ -87,22 +87,22 @@ func (s *Session) SetOnLost(fn func()) {
 
 // KeepAlive blocks until the lease is lost or ctx is cancelled.
 func (s *Session) KeepAlive(ctx context.Context) error {
-	ch, err := s.client.KeepAlive(ctx, s.leaseID)
+	ch, err := s.client.KeepAlive(ctx, s.leaseID) //clientv3 built in keepAlive
 	if err != nil {
 		return err
 	}
 	for {
 		select {
-		case <-ctx.Done():
+		case <-ctx.Done(): //Manager called stopKeepalive(), exit cleanly
 			return ctx.Err()
 		case ka, ok := <-ch:
-			if !ok {
+			if !ok { //can't reach etcd server, probably network partition or serious issue
 				if s.onLost != nil {
 					s.onLost()
 				}
 				return fmt.Errorf("etcd lease keepalive lost")
 			}
-			if ka == nil {
+			if ka == nil { //not primary key, no active lease
 				if s.onLost != nil {
 					s.onLost()
 				}

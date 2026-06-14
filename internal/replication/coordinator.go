@@ -23,28 +23,27 @@ const (
 	backupReadyTimeout = 30 * time.Second
 )
 
-// Coordinator replicates WAL entries to a remote backup before client ack.
+// This class is reponsible for replicating WAL entries to backup
 type Coordinator struct {
 	wal        *wal.Log
-	client     pb.SnowcastReplicationClient
-	conn       *grpc.ClientConn
+	client     pb.SnowcastReplicationClient //replication client object
+	conn       *grpc.ClientConn //replication client connection
 	lastWalSeq uint64
 	mu         sync.Mutex
 }
 
 var global *Coordinator
 
-// Global returns the active coordinator.
 func Global() *Coordinator {
 	return global
 }
 
-// DefaultWalPath returns the default primary WAL path for a port.
+// returns the default primary WAL path for a port.
 func DefaultWalPath(port string) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("snowcast-%s.wal", port))
 }
 
-// DefaultBackupWalPath returns the default backup WAL path.
+// returns the default backup WAL path.
 func DefaultBackupWalPath(replPort string) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("snowcast-backup-%s.wal", replPort))
 }
@@ -58,12 +57,12 @@ func Start(walPath, backupAddr string) error {
 	return StartWithWal(w, backupAddr)
 }
 
-// StartWithWal uses an already-open WAL as leader outbound replication coordinator.
+// Connect leader WAL to backup. Only called on startup, since we give the backup 30s to get ready on launch
 func StartWithWal(w *wal.Log, backupAddr string) error {
 	return startWithWal(w, backupAddr, backupReadyTimeout)
 }
 
-// StartWithWalTimeout is like StartWithWal with a custom readiness timeout.
+// Connect leader WAL to backup, with custom timeout. Used during promotion since we don't want to wait for a dead leader.
 func StartWithWalTimeout(w *wal.Log, backupAddr string, readyTimeout time.Duration) error {
 	return startWithWal(w, backupAddr, readyTimeout)
 }
@@ -101,9 +100,12 @@ func (c *Coordinator) WAL() *wal.Log {
 	return c.wal
 }
 
+
+// Try to connect to backup server with retries until timeout
 func dialBackup(backupAddr string, readyTimeout time.Duration) (*grpc.ClientConn, error) {
 	deadline := time.Now().Add(readyTimeout)
 	for time.Now().Before(deadline) {
+		//create new gRPC connection object, do not dial yet
 		conn, err := grpc.NewClient(backupAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil { //error creating gRPC client for some reason
 			time.Sleep(100 * time.Millisecond)

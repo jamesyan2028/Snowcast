@@ -10,6 +10,8 @@ import (
 	pb "snowcast-jamesyan2028/pkg/protocol"
 )
 
+//utils for replicating to local WAL
+
 // LocalCoordinator persists to WAL and applies locally (promoted backup, no remote peer).
 type LocalCoordinator struct {
 	wal *wal.Log
@@ -29,7 +31,7 @@ func NewLocalFromLog(w *wal.Log) *LocalCoordinator {
 	return &LocalCoordinator{wal: w}
 }
 
-// Recover replays WAL entries into memory.
+// replays WAL entries into memory.
 func (c *LocalCoordinator) Recover() error {
 	entries, err := c.wal.ReadAll()
 	if err != nil {
@@ -43,7 +45,7 @@ func (c *LocalCoordinator) Recover() error {
 	return nil
 }
 
-// ReplicateAndWait appends to WAL and applies locally.
+// appends to WAL and applies locally.
 func (c *LocalCoordinator) ReplicateAndWait(ctx context.Context, entry *pb.WalEntry, apply func() error, rollback func()) error {
 	_, err := c.wal.Append(entry)
 	if err != nil {
@@ -56,7 +58,7 @@ func (c *LocalCoordinator) ReplicateAndWait(ctx context.Context, entry *pb.WalEn
 	return nil
 }
 
-// Close closes the WAL.
+// closes the WAL.
 func (c *LocalCoordinator) Close() error {
 	if c.wal != nil {
 		return c.wal.Close()

@@ -17,28 +17,28 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-// Config holds node role and networking settings.
+//holds node role and networking settings
 type Config struct {
 	EtcdEndpoints string
 	EtcdKey       string
 	LeaseTTL      int64
 	LeasePoll     time.Duration
-	ClientPort    string
-	ReplPort      string
-	BackupAddr    string
+	ClientPort    string //port clients send gRPC requests to
+	ReplPort      string //port  on this node that listens for replication requests
+	BackupAddr    string // full address of the backup replication server
 	WalPath       string
 	Files         []string
 }
 
-// Manager orchestrates leader/standby role transitions.
+// Manager class is responsible for monitoring and changing node state in response to leadership set in etcd server
 type Manager struct {
 	cfg Config
 
-	etcdClient *clientv3.Client
+	etcdClient *clientv3.Client //connection to etcd server
 	wal        *wal.Log
 
 	mu         sync.Mutex
-	role       string // "leader" or "standby"
+	role       string // leader or standby
 	replServer *replication.ReplServer
 	clientSrv  *runtime.Server
 	session    *leadership.Session
@@ -50,7 +50,7 @@ const (
 	roleStandby = "standby"
 )
 
-// New opens WAL and etcd client.
+// opens WAL and new etcd client.
 func New(cfg Config) (*Manager, error) {
 	if cfg.EtcdKey == "" {
 		cfg.EtcdKey = leadership.DefaultKey
@@ -76,7 +76,7 @@ func New(cfg Config) (*Manager, error) {
 	return &Manager{cfg: cfg, wal: w, etcdClient: ec, role: roleStandby}, nil
 }
 
-// Close releases etcd and WAL.
+// releases etcd and WAL.
 func (m *Manager) Close() {
 	m.stopKeepalive()
 	if m.clientSrv != nil {
@@ -94,10 +94,11 @@ func (m *Manager) Close() {
 	}
 }
 
-// RunAsLeader acquires etcd lease and serves clients.
+// Only called on startup, the being primary server. Acquires etcd lease and serves clients
 func (m *Manager) RunAsLeader() error {
 	state.InitStations(m.cfg.Files)
 
+	//context attached to synchronous go functions, we use .Background() since its long running
 	ctx := context.Background()
 	primaryValue := fmt.Sprintf("127.0.0.1:%s", m.cfg.ClientPort)
 	session, err := leadership.Acquire(ctx, m.etcdClient, m.cfg.EtcdKey, primaryValue, m.cfg.LeaseTTL)
@@ -110,10 +111,12 @@ func (m *Manager) RunAsLeader() error {
 	m.role = roleLeader
 	m.mu.Unlock()
 
+	//start primary and backup WAL, make sure they are both synced
 	if err := replication.StartWithWal(m.wal, m.cfg.BackupAddr); err != nil {
 		return err
 	}
 
+	//begin client serving
 	clientSrv, err := runtime.Serve(m.cfg.ClientPort, m.cfg.Files, replication.Global())
 	if err != nil {
 		replication.ShutdownGlobal()
@@ -130,7 +133,7 @@ func (m *Manager) RunAsLeader() error {
 	return nil
 }
 
-// RunAsStandby starts inbound replication and polls etcd for promotion.
+// RunAsStandby starts inbound replication and polls etcd for promotion. Only called on startup
 func (m *Manager) RunAsStandby() error {
 	state.InitStations(m.cfg.Files)
 
@@ -143,7 +146,9 @@ func (m *Manager) RunAsStandby() error {
 	return nil
 }
 
+//ran continuously by backup to check if the primary is alive
 func (m *Manager) runEtcdPollLoop() {
+	//variable on startup, keep trying until seenPrimary is true
 	seenPrimary := false
 	for {
 		time.Sleep(m.cfg.LeasePoll)
@@ -166,6 +171,7 @@ func (m *Manager) runEtcdPollLoop() {
 			seenPrimary = true
 			continue
 		}
+		//keep trying until seenPrimary is true
 		if !seenPrimary {
 			continue
 		}
@@ -235,9 +241,11 @@ func (m *Manager) promoteToLeader(session *leadership.Session) error {
 	}
 
 	var repl control.Replicator
+	//if we fail to connect to backup, only setup local WAL
 	if replTarget == "" {
 		repl = replication.NewLocalFromLog(m.wal)
 	} else {
+		//setup replication coordinator that syncs to backup
 		repl = replication.Global()
 	}
 

@@ -22,15 +22,15 @@ type inboundHandler struct {
 	accepting  bool
 }
 
-// ReplServer serves inbound SnowcastReplication RPCs (standby mode).
+// This class is responsible for serving inbound SnowcastReplication RPCs when a server is in standby mode.
 type ReplServer struct {
-	grpc   *grpc.Server
-	lis    net.Listener
-	handler *inboundHandler
-	done   chan struct{}
+	grpc   *grpc.Server //replication server
+	lis    net.Listener //holds port 16801 to listen for replication requests
+	handler *inboundHandler //replication logic
+	done   chan struct{} //allows for graceful stop, serve all active gRPC requests before shutting down
 }
 
-// StartReplServer listens on replPort and persists replicated WAL entries.
+//listens on replPort and persists replicated WAL entries.
 func StartReplServer(replPort string, w *wal.Log) (*ReplServer, error) {
 	lis, err := net.Listen("tcp", ":"+replPort)
 	if err != nil {
@@ -48,6 +48,7 @@ func StartReplServer(replPort string, w *wal.Log) (*ReplServer, error) {
 		done:    make(chan struct{}),
 	}
 
+	//accept replication connections
 	go func() {
 		defer close(rs.done)
 		log.Printf("Replication server listening on :%s", replPort)
@@ -56,6 +57,7 @@ func StartReplServer(replPort string, w *wal.Log) (*ReplServer, error) {
 		}
 	}()
 
+	//return replication server object to manager to close later
 	return rs, nil
 }
 
@@ -68,6 +70,7 @@ func (r *ReplServer) GracefulStop() {
 	r.handler.accepting = false
 	r.handler.mu.Unlock()
 
+	//call graceful stop on gRPC server object
 	r.grpc.GracefulStop()
 	<-r.done
 }
